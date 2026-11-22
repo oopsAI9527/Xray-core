@@ -91,6 +91,7 @@ func (b *Bridge) monitor() error {
 }
 
 func (b *Bridge) Start() error {
+	b.monitor()
 	return b.monitorTask.Start()
 }
 
