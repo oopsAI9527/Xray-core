@@ -12,8 +12,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/crypto"
 	"github.com/xtls/xray-core/common/errors"
+	"github.com/xtls/xray-core/common/task"
 	"lukechampine.com/blake3"
 )
 
@@ -38,6 +40,7 @@ type ServerInstance struct {
 	Lasts    map[int64][16]byte
 	Tickets  [][16]byte
 	Sessions map[[16]byte]*ServerSession
+	Cleanup  *task.Periodic
 }
 
 func (i *ServerInstance) Init(nfsSKeysBytes [][]byte, xorMode uint32, secondsFrom, secondsTo int64, padding string) (err error) {
@@ -79,13 +82,12 @@ func (i *ServerInstance) Init(nfsSKeysBytes [][]byte, xorMode uint32, secondsFro
 		i.Lasts = make(map[int64][16]byte)
 		i.Tickets = make([][16]byte, 0, 1024)
 		i.Sessions = make(map[[16]byte]*ServerSession)
-		go func() {
-			for {
-				time.Sleep(time.Minute)
+		i.Cleanup = &task.Periodic{
+			Execute: func() error {
 				i.RWLock.Lock()
 				if i.Closed {
 					i.RWLock.Unlock()
-					return
+					return errors.New("closed")
 				}
 				minute := time.Now().Unix() / 60
 				last := i.Lasts[minute]
@@ -101,13 +103,17 @@ func (i *ServerInstance) Init(nfsSKeysBytes [][]byte, xorMode uint32, secondsFro
 					}
 				}
 				i.RWLock.Unlock()
-			}
-		}()
+				return nil
+			},
+			Interval: time.Minute,
+		}
+		i.Cleanup.Start()
 	}
 	return
 }
 
 func (i *ServerInstance) Close() (err error) {
+	common.CloseIfExists(i.Cleanup)
 	i.RWLock.Lock()
 	i.Closed = true
 	i.RWLock.Unlock()
